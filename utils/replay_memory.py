@@ -14,6 +14,8 @@ class Memory(object):
 
     def push(self, *args):
         """Saves a transition."""
+        # print('A',*args)
+        # print('T',Transition(*args))
         self.memory.append(Transition(*args))
 
     def sample(self, batch_size=None):

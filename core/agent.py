@@ -26,14 +26,37 @@ def collect_samples(pid, queue, env, policy, custom_reward,
         reward_episode = 0
 
         for t in range(10000):
-            state_var = tensor(state).unsqueeze(0)
+            #TODO: temporarily for a single agent we make the state
+            #  artificially into a list.
+            state_var = [tensor(state).unsqueeze(0), tensor(state).unsqueeze(0)]
+            # state_var = [tensor(state).unsqueeze(0)]
+            # print(state_var)
+            # state_var = tensor(state).unsqueeze(0)
             with torch.no_grad():
                 if mean_action:
+                    # print('mean', policy(state_var))
                     action = policy(state_var)[0][0].numpy()
                 else:
-                    action = policy.select_action(state_var)[0].numpy()
-            action = int(action) if policy.is_disc_action else action.astype(np.float64)
-            next_state, reward, done, _ = env.step(action)
+                    # print('else', policy.select_action(state_var))
+                    action = policy.select_action(state_var)
+                    # print(action[0][0].numpy())
+                    # print(action)
+                    # action_var = torch.stack([a[0] for a inaction, dim=1)
+                    action_var = torch.cat(action, dim=1)[0].numpy()
+                    action = [a[0].numpy() for a in action]
+                    # print(action_var)
+                    # print(action)
+                    # action = policy.select_action(state_var)[0].numpy()
+            # print(action)
+            # action = int(action) if policy.is_disc_action else action.astype(np.float64)
+            # print(action)
+            action_var = [int(a) for a in action_var] if policy.is_disc_action else [a.astype(np.float64) for a in action_var]
+            # print('aa', action)
+            # print('av', action_var)
+            # next_state, reward, done, _ = env.step(action)
+            # TODO: while we use an environment that doesn't accept multi-agent
+            #  action lists
+            next_state, reward, done, _ = env.step(action_var)
             reward_episode += reward
             if running_state is not None:
                 next_state = running_state(next_state)
@@ -46,7 +69,10 @@ def collect_samples(pid, queue, env, policy, custom_reward,
 
             mask = 0 if done else 1
 
-            memory.push(state, action, mask, next_state, reward)
+            #TODO@ while we use an environment that doesn't accept multi-agent
+            #  action lists
+            memory.push([state, state], action, [mask], [next_state, next_state], [reward])
+            # memory.push(state, action, mask, next_state, reward)
 
             if render:
                 env.render()
