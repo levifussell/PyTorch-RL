@@ -1,4 +1,5 @@
 import numpy as np
+import argparse
 import torch as th
 import gym
 import sys
@@ -13,6 +14,22 @@ from core.ppo import ppo_step
 from core.common import estimate_advantages
 from core.agent import Agent
 
+# multiagent environment
+import custom_environments
+env = gym.make('predator-prey-v2')
+# parser = argparse.ArgumentParser('Predator Prey')
+# parser.add_argument('--nenemies', type=int, default=2, help='number of predators')
+# parser.add_argument('--nfriendly', type=int, default=1, help='number of preys')
+# env.init_curses()
+# env.init_args(parser)
+# args = parser.parse_args()
+# env.multi_agent_init(args)
+# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../multiagent-particle-envs')))
+# from make_env import make_env
+# env = make_env('simple_tag')
+
+
+
 '''
 First test is that the single-agent bipedal walker can learn through
 the multi-agent system.
@@ -22,21 +39,21 @@ th.set_default_dtype(dtype)
 device = th.device('cpu')
 #TODO: cuda
 
-# environment things
-env = gym.make("BipedalWalker-v2")
-state_dim = np.shape(env.observation_space)[0]*2
-action_dim = np.shape(env.action_space)[0]
-
-# seed
-seed_id = 12
-np.random.seed(seed_id)
-th.manual_seed(seed_id)
-env.seed(seed_id)
-
 # multi-agent params
 communication_dim = 64
 communication_steps = 2
 num_agents = 2
+
+# environment things
+# env = gym.make("BipedalWalker-v2")
+# state_dim = np.shape(env.observation_space)[0]*num_agents
+# state_dim = 16 * num_agents
+# print(env.observation_space)
+state_dim = 6 * num_agents
+action_dim = 5 * num_agents
+# action_dim = np.shape(env.action_space)[0]
+# action_dim = 5 * num_agents
+# print(env.action_space[0])
 
 # create networks
 actor_net = CommNet(
@@ -63,7 +80,7 @@ learning_rate_actor = 3e-4
 learning_rate_critic = 3e-4
 l2_reg = 1e-3
 clip_epsilon = 0.2
-save_model_interval = 0
+save_model_interval = 5
 log_interval = 1
 min_batch_size = 2048 # size of a rollout batch
 max_iter_num = 500
@@ -90,11 +107,16 @@ def update_params(batch, i_iter):
     # because each item in the batch is a list we must convert it
     #  accordingly.
     # print(batch.reward)
-    # print(batch.state)
+    # print(np.stack(batch.state, 1)[0])
+    # print(len(np.stack(batch.state, 1)[0]))
+    # print(batch.state[:2])
+    # print(np.stack(batch.state[:2], 1))
+    # print(batch.state[:3])
     states = [torch.from_numpy(a).to(dtype).to(device) for a in np.stack(batch.state, 1)]
     actions = [torch.from_numpy(a).to(dtype).to(device) for a in np.stack(batch.action, 1)]
-    rewards = [torch.from_numpy(a).to(dtype).to(device) for a in np.stack(batch.reward, 1)]
+    rewards = [torch.from_numpy(a).to(dtype).to(device)[:, None] for a in np.stack(batch.reward, 1)]
     masks = [torch.from_numpy(a).to(dtype).to(device) for a in np.stack(batch.mask, 1)]
+    # print(rewards)
     # print(states)
     # print(states[0].size())
     # print(rewards)
@@ -110,6 +132,7 @@ def update_params(batch, i_iter):
     # masks = torch.from_numpy(np.stack(batch.mask)).to(dtype).to(device)
     with torch.no_grad():
         values = critic_net(states)
+        # print(values)
         # print(states)
         # print(len(states))
         # print(states[0].size())
@@ -119,7 +142,6 @@ def update_params(batch, i_iter):
         fixed_log_probs = actor_net.get_log_prob(states, actions)
 
     """get advantage estimation from the trajectories"""
-    # advantages, returns = \
     adv_returns_tuple = \
         [estimate_advantages(r, m, v, gamma, tau, device)
         for r,m,v in zip(rewards, masks, values)]
@@ -128,6 +150,7 @@ def update_params(batch, i_iter):
     for a,r in adv_returns_tuple:
         advantages.append(a)
         returns.append(r)
+    # print(advantages)
 
     # advantages, returns = estimate_advantages(rewards, masks, values, args.gamma, args.tau, device)
 
@@ -164,28 +187,72 @@ def update_params(batch, i_iter):
 
 
 def main_loop():
+
+    # seed
+    seed_id = 12
+    np.random.seed(seed_id)
+    th.manual_seed(seed_id)
+    env.seed(seed_id)
+
     for i_iter in range(max_iter_num):
         """generate multiple trajectories that reach the minimum batch_size"""
-        batch, log = agent.collect_samples(min_batch_size)
+        batch, log = agent.collect_samples(min_batch_size, num_agents)
         t0 = time.time()
         update_params(batch, i_iter)
         t1 = time.time()
 
         if i_iter % log_interval == 0:
-            print('{}\tT_sample {:.4f}\tT_update {:.4f}\tR_min {:.2f}\tR_max {:.2f}\tR_avg {:.2f}'.format(
-                i_iter, log['sample_time'], t1-t0, log['min_reward'], log['max_reward'], log['avg_reward']))
+            print('{}\tT_sample {:.4f}\tT_update {:.4f}\tSteps: {:.3f}\tR_min {:.2f}\tR_max {:.2f}\tR_avg {}'.format(
+                i_iter, log['sample_time'], t1-t0, log['avg_steps'], log['min_reward'], log['max_reward'], log['avg_reward']))
 
         if save_model_interval > 0 and (i_iter+1) % save_model_interval == 0:
             to_device(torch.device('cpu'), actor_net, critic_net)
-            pickle.dump((actor_net, critic_net, running_state),
-                        open(os.path.join(assets_dir(), 'learned_models/{}_ppo.p'.format(env_name)), 'wb'))
+            # pickle.dump((actor_net, critic_net, running_state),
+                        # open(os.path.join(assets_dir(), 'learned_models/{}_ppo.p'.format(env_name)), 'wb'))
+            torch.save({
+                        'epoch': i_iter,
+                        'actor': actor_net.state_dict(),
+                        'critic': critic_net.state_dict()
+                        }, os.path.join('trained_models/epoch{}_multi_ppo.pth'.format(i_iter)))
             to_device(device, actor_net, critic_net)
+            print('MODEL SAVED.')
 
         """clean up gpu memory"""
         torch.cuda.empty_cache()
 
+def test_loop(model_file):
 
-main_loop()
+    # seed
+    # seed_id = 12
+    # np.random.seed(seed_id)
+    # th.manual_seed(seed_id)
+    # env.seed(seed_id)
+
+    # load the model file
+    model_file = torch.load(model_file)
+    actor_net.load_state_dict(model_file['actor'])
+    critic_net.load_state_dict(model_file['critic'])
+
+    # run the test
+    env.init_curses()
+    _, log = agent.collect_samples(100, num_agents, render=True)
+    env.exit_render()
+
+    print('R_min {:.2f}\tR_max {:.2f}\tR_avg {}'.format(
+                log['avg_steps'], log['min_reward'], log['max_reward'], log['avg_reward']))
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--test_model', type=str, default='', help='define a test model file to load.')
+
+    args = parser.parse_args()
+
+    if args.test_model == '':
+        print('BEGINNNING TRAINING MODE.')
+        main_loop()
+    else:
+        print('BEGINNING TESTING MODE.')
+        test_loop(args.test_model)
 
 
 

@@ -14,7 +14,7 @@ def ppo_step(policy_net, value_net, optimizer_policy, optimizer_value, optim_val
             # convert the values to a single batch
             values_pred = torch.cat(values_pred, dim=0)
             # print(returns)
-            returns = torch.cat(returns, dim=0).repeat(num_agents, 1)
+            returns = torch.cat(returns, dim=0)#.repeat(num_agents, 1)
         # print(returns)
         # print(returns.size())
         # print(values_pred)
@@ -34,7 +34,7 @@ def ppo_step(policy_net, value_net, optimizer_policy, optimizer_value, optim_val
         # convert the log probs to a single batch
         log_probs = torch.cat(log_probs, dim=0)
         fixed_log_probs = torch.cat(fixed_log_probs, dim=0)
-        advantages = torch.cat(advantages, dim=0).repeat(num_agents, 1)
+        advantages = torch.cat(advantages, dim=0)#.repeat(num_agents, 1)
 
     ratio = torch.exp(log_probs - fixed_log_probs)
     surr1 = ratio * advantages
